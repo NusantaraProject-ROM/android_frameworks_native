@@ -26,12 +26,15 @@
 #include <gui/BufferQueue.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/HidlTransportUtils.h>
+#include <vendor/qti/hardware/display/composer/2.1/IQtiComposerClient.h>
+#include <vendor/display/config/1.16/IDisplayConfig.h>
 
 namespace android {
 
 using hardware::Return;
 using hardware::hidl_vec;
 using hardware::hidl_handle;
+using vendor::qti::hardware::display::composer::V2_1::IQtiComposerClient;
 
 namespace Hwc2 {
 
@@ -128,6 +131,26 @@ void Composer::CommandWriter::setLayerInfo(uint32_t type, uint32_t appId)
     endCommand();
 }
 
+void Composer::CommandWriter::setLayerType(uint32_t type)
+{
+    constexpr uint16_t kSetLayerTypeLength = 1;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_LAYER_TYPE),
+                 kSetLayerTypeLength);
+    write(type);
+    endCommand();
+}
+
+void Composer::CommandWriter::setDisplayElapseTime(uint64_t time)
+{
+    constexpr uint16_t kSetDisplayElapseTimeLength = 2;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_DISPLAY_ELAPSE_TIME),
+                 kSetDisplayElapseTimeLength);
+    write64(time);
+    endCommand();
+}
+
 void Composer::CommandWriter::setClientTargetMetadata(
         const IVrComposerClient::BufferMetadata& metadata)
 {
@@ -196,6 +219,17 @@ Composer::Composer(const std::string& serviceName)
 
     if (mClient == nullptr) {
         LOG_ALWAYS_FATAL("failed to create composer client");
+    }
+
+    // On successful creation of composer client only allowIdleFallback
+    if (mClient) {
+        using vendor::display::config::V1_16::IDisplayConfig;
+        android::sp<IDisplayConfig> disp_config_v1_16 = IDisplayConfig::getService();
+        if (disp_config_v1_16 != NULL) {
+            if (disp_config_v1_16->allowIdleFallback()) {
+                ALOGW("failed to set Idle time");
+            }
+        }
     }
 
     if (mIsUsingVrComposer) {
@@ -618,6 +652,13 @@ Error Composer::setOutputBuffer(Display display, const native_handle_t* buffer,
     return Error::NONE;
 }
 
+Error Composer::setDisplayElapseTime(Display display, uint64_t timeStamp)
+{
+    mWriter.selectDisplay(display);
+    mWriter.setDisplayElapseTime(timeStamp);
+    return Error::NONE;
+}
+
 Error Composer::setPowerMode(Display display, IComposerClient::PowerMode mode) {
     Return<Error> ret(Error::UNSUPPORTED);
     if (mClient_2_2) {
@@ -831,6 +872,19 @@ Error Composer::setLayerInfo(Display display, Layer layer, uint32_t type,
         mWriter.selectLayer(layer);
         mWriter.setLayerInfo(type, appId);
     }
+    return Error::NONE;
+}
+
+Error Composer::setLayerType(Display display, Layer layer, uint32_t type)
+{
+    if (mClient_2_3) {
+        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_3)) {
+            mWriter.selectDisplay(display);
+            mWriter.selectLayer(layer);
+            mWriter.setLayerType(type);
+        }
+    }
+
     return Error::NONE;
 }
 

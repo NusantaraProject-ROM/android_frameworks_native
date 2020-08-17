@@ -54,7 +54,6 @@ uint64_t getValid10UsageBits() {
         ALOGI("Adding additional valid usage bits: 0x%" PRIx64, addnl_bits);
         bits = bits | addnl_bits;
 #endif
-
         return bits;
     }();
     return valid10UsageBits;
