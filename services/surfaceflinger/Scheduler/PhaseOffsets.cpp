@@ -96,6 +96,7 @@ PhaseOffsets::PhaseOffsets() {
     highFpsOffsets.late = {RefreshRateType::PERFORMANCE, highFpsLateSfOffsetNs,
                            highFpsLateAppOffsetNs};
 
+    mOffsets.insert({RefreshRateType::POWER_SAVING, defaultOffsets});
     mOffsets.insert({RefreshRateType::DEFAULT, defaultOffsets});
     mOffsets.insert({RefreshRateType::PERFORMANCE, highFpsOffsets});
 
