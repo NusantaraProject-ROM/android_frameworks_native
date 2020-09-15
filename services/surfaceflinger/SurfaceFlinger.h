@@ -603,6 +603,7 @@ private:
             int32_t sequenceId, hal::HWDisplayId display,
             const hal::VsyncPeriodChangeTimeline& updatedTimeline) override;
     void onSeamlessPossible(int32_t sequenceId, hal::HWDisplayId display) override;
+    void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
 
     /* ------------------------------------------------------------------------
      * ISchedulerCallback
@@ -929,6 +930,8 @@ private:
                                const DisplayDeviceState& currentState,
                                const DisplayDeviceState& drawingState) REQUIRES(mStateLock);
     void processDisplayHotplugEventsLocked() REQUIRES(mStateLock);
+    void setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                      const DisplayDeviceState& state);
 
     void dispatchDisplayHotplugEvent(PhysicalDisplayId displayId, bool connected);
 
@@ -1070,6 +1073,26 @@ private:
 
     void setContentFps(uint32_t contentFps);
 
+    bool isInternalDisplay(const sp<DisplayDevice>& display);
+
+    bool getHwcDisplayId(const sp<DisplayDevice>& display, uint32_t *hwcDisplayId);
+
+    void updateDisplayExtension(uint32_t displayId, uint32_t configId, bool connected);
+
+    void setDisplayExtnActiveConfig(uint32_t displayId, uint32_t activeConfigId);
+
+    void notifyAllDisplaysUpdateImminent();
+
+    void notifyDisplayUpdateImminent();
+
+    void handlePresentationDisplaysEarlyWakeup(size_t updatingDisplays, uint32_t layerStackId);
+
+    void updateInternalDisplaysPresentationMode();
+
+    void setupEarlyWakeUpFeature();
+
+    void createPhaseOffsetExtn();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1190,6 +1213,7 @@ private:
     // If blurs are considered expensive and should require high GPU frequency.
     bool mBlursAreExpensive = false;
     bool mUseAdvanceSfOffset = false;
+    bool mUseFbScaling = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
@@ -1403,6 +1427,9 @@ public:
     int mNumIdle = -1;
 
 private:
+    bool mEarlyWakeUpEnabled = false;
+    bool wakeUpPresentationDisplays = false;
+    bool mInternalPresentationDisplays = false;
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
     bool (*mDolphinInit)() = nullptr;
@@ -1419,6 +1446,8 @@ private:
     composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
     composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
     composer::DisplayExtnIntf *mDisplayExtnIntf = nullptr;
+    bool mUseLayerExt = false;
+    bool mSplitLayerExt = false;
 };
 
 } // namespace android
