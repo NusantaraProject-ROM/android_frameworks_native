@@ -155,16 +155,6 @@ uint64_t Surface::getNextFrameNumber() const {
     return mNextFrameNumber;
 }
 
-bool Surface::isBufferAccumulated() const {
-    Mutex::Autolock lock(mMutex);
-    return mIsBufferAccumulated;
-}
-
-void Surface::setPresentTimeMode(int mode) {
-    Mutex::Autolock lock(mMutex);
-    mPresentTimeMode = mode;
-}
-
 String8 Surface::getConsumerName() const {
     return mGraphicBufferProducer->getConsumerName();
 }
@@ -931,7 +921,6 @@ int Surface::queueBuffer(android_native_buffer_t* buffer, int fenceFd) {
     }
 
     mConsumerRunningBehind = (output.numPendingBuffers >= 2);
-    mIsBufferAccumulated = mConsumerRunningBehind;
 
     if (!mConnectedToCpu) {
         // Clear surface damage back to full-buffer
@@ -981,9 +970,6 @@ int Surface::query(int what, int* value) const {
     { // scope for the lock
         Mutex::Autolock lock(mMutex);
         switch (what) {
-            case NATIVE_WINDOW_PRESENT_TIME_MODE:
-                *value = mPresentTimeMode;
-                return NO_ERROR;
             case NATIVE_WINDOW_FORMAT:
                 if (mReqFormat) {
                     *value = static_cast<int>(mReqFormat);
