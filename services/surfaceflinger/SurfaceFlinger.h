@@ -411,6 +411,8 @@ public:
 
     nsecs_t mVsyncTimeStamp = -1;
 
+    void NotifyIdleStatus();
+
 private:
     friend class BufferLayer;
     friend class BufferQueueLayer;
@@ -905,6 +907,7 @@ private:
 
     sp<DisplayDevice> getVsyncSource();
     void updateVsyncSource();
+    void forceResyncModel();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
@@ -1094,6 +1097,8 @@ private:
 
     void createPhaseOffsetExtn();
 
+    void setEarlyWakeUpConfig(const sp<DisplayDevice>& display, hal::PowerMode mode);
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1220,6 +1225,9 @@ private:
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
+
+    std::mutex mVsyncPeriodMutex;
+    std::vector<nsecs_t> mVsyncPeriods;
 
     TransactionCompletedThread mTransactionCompletedThread;
 
