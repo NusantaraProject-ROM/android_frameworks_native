@@ -381,7 +381,11 @@ DisplayConnectionType HWComposer::getDisplayConnectionType(DisplayId displayId) 
             ? DisplayConnectionType::Internal
             : DisplayConnectionType::External;
 
-    RETURN_IF_HWC_ERROR(error, displayId, FALLBACK_TYPE);
+    if (error != hal::Error::NONE) {
+      ALOGV("%s failed with error %s", __FUNCTION__, to_string(error).c_str());
+      return FALLBACK_TYPE;
+    }
+
     return type;
 }
 
@@ -585,6 +589,7 @@ status_t HWComposer::presentAndGetReleaseFences(DisplayId displayId) {
         return NO_ERROR;
     }
 
+    displayData.lastPresentFence = Fence::NO_FENCE;
     auto error = hwcDisplay->present(&displayData.lastPresentFence);
     RETURN_IF_HWC_ERROR_FOR("present", error, displayId, UNKNOWN_ERROR);
 
@@ -604,10 +609,6 @@ status_t HWComposer::setPowerMode(DisplayId displayId, hal::PowerMode mode) {
     if (displayData.isVirtual) {
         LOG_DISPLAY_ERROR(displayId, "Invalid operation on virtual display");
         return INVALID_OPERATION;
-    }
-
-    if (mode == hal::PowerMode::OFF) {
-        setVsyncEnabled(displayId, hal::Vsync::DISABLE);
     }
 
     auto& hwcDisplay = displayData.hwcDisplay;
@@ -998,6 +999,16 @@ void HWComposer::loadLayerMetadataSupport() {
 
 uint32_t HWComposer::getMaxVirtualDisplayCount() const {
     return mComposer->getMaxVirtualDisplayCount();
+}
+
+status_t HWComposer::setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    const auto& displayData = mDisplayData[displayId];
+
+    auto error = displayData.hwcDisplay->setDisplayElapseTime(timeStamp);
+    if (error == hal::Error::BAD_PARAMETER) RETURN_IF_HWC_ERROR(error, displayId, BAD_VALUE);
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
 }
 
 } // namespace impl

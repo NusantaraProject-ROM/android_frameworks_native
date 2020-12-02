@@ -81,8 +81,33 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <list>
 
 using namespace android::surfaceflinger;
+
+namespace smomo {
+class SmomoIntf;
+} // namespace smomo
+
+namespace composer {
+class ComposerExtnIntf;
+class ComposerExtnLib;
+class FrameSchedulerIntf;
+class DisplayExtnIntf;
+} // namespace composer
+
+using smomo::SmomoIntf;
+
+namespace composer {
+class LayerExtnIntf;
+}
+
+using composer::LayerExtnIntf;
+
+namespace composer {
+class FrameExtnIntf;
+}
+using composer::FrameExtnIntf;
 
 namespace android {
 
@@ -172,6 +197,52 @@ public:
     int32_t mComposerSequenceId = 0;
 };
 
+class SmomoWrapper {
+public:
+    SmomoWrapper() {}
+    ~SmomoWrapper();
+
+    bool init();
+
+    SmomoIntf* operator->() { return mInst; }
+    operator bool() { return mInst != nullptr; }
+
+    SmomoWrapper(const SmomoWrapper&) = delete;
+    SmomoWrapper& operator=(const SmomoWrapper&) = delete;
+
+private:
+    SmomoIntf *mInst = nullptr;
+    void *mSmoMoLibHandle = nullptr;
+
+    using CreateSmoMoFuncPtr = std::add_pointer<bool(uint16_t, SmomoIntf**)>::type;
+    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
+    CreateSmoMoFuncPtr mSmoMoCreateFunc;
+    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
+};
+
+class LayerExtWrapper {
+public:
+    LayerExtWrapper() {}
+    ~LayerExtWrapper();
+
+    bool init();
+
+    LayerExtnIntf* operator->() { return     mInst; }
+    operator bool() { return mInst != nullptr; }
+
+    LayerExtWrapper(const LayerExtWrapper&) = delete;
+    LayerExtWrapper& operator=(const LayerExtWrapper&) = delete;
+
+private:
+    LayerExtnIntf *mInst = nullptr;
+    void *mLayerExtLibHandle = nullptr;
+
+    using CreateLayerExtnFuncPtr = std::add_pointer<bool(uint16_t, LayerExtnIntf**)>::type;
+    using DestroyLayerExtnFuncPtr = std::add_pointer<void(LayerExtnIntf*)>::type;
+    CreateLayerExtnFuncPtr mLayerExtCreateFunc;
+    DestroyLayerExtnFuncPtr mLayerExtDestroyFunc;
+};
+
 class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
                        public ClientCache::ErasedRecipient,
@@ -242,6 +313,8 @@ public:
 
     static bool useContextPriority;
 
+    static bool sDirectStreaming;
+
     // The data space and pixel format that SurfaceFlinger expects hardware composer
     // to composite efficiently. Meaning under most scenarios, hardware composer
     // will accept layers with the data space and pixel format.
@@ -298,10 +371,10 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-    void setPrimaryVsyncEnabled(bool enabled);
+    void setVsyncEnabled(bool enabled);
 
     // main thread function to enable/disable h/w composer event
-    void setPrimaryVsyncEnabledInternal(bool enabled) REQUIRES(mStateLock);
+    void setVsyncEnabledInternal(bool enabled) REQUIRES(mStateLock);
 
     // called on the main thread by MessageQueue when an internal message
     // is received
@@ -335,6 +408,10 @@ public:
     // If set, disables reusing client composition buffers. This can be set by
     // debug.sf.disable_client_composition_cache
     bool mDisableClientCompositionCache = false;
+
+    nsecs_t mVsyncTimeStamp = -1;
+
+    void NotifyIdleStatus();
 
 private:
     friend class BufferLayer;
@@ -504,6 +581,8 @@ private:
     status_t setFrameRate(const sp<IGraphicBufferProducer>& surface, float frameRate,
                           int8_t compatibility) override;
     status_t acquireFrameRateFlexibilityToken(sp<IBinder>* outToken) override;
+    status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
+
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -526,6 +605,7 @@ private:
             int32_t sequenceId, hal::HWDisplayId display,
             const hal::VsyncPeriodChangeTimeline& updatedTimeline) override;
     void onSeamlessPossible(int32_t sequenceId, hal::HWDisplayId display) override;
+    void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
 
     /* ------------------------------------------------------------------------
      * ISchedulerCallback
@@ -607,6 +687,7 @@ private:
     void commitInputWindowCommands() REQUIRES(mStateLock);
     void setInputWindowsFinished();
     void updateCursorAsync();
+    void updateFrameScheduler();
     void initScheduler(DisplayId primaryDisplayId);
 
     /* handlePageFlip - latch a new buffer if available and compute the dirty
@@ -646,6 +727,7 @@ private:
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
                                        const Vector<ComposerState>& states);
     uint32_t setDisplayStateLocked(const DisplayState& s) REQUIRES(mStateLock);
+    void checkVirtualDisplayHint(const Vector<DisplayState>& displays);
     uint32_t addInputWindowCommands(const InputWindowCommands& inputWindowCommands)
             REQUIRES(mStateLock);
 
@@ -738,6 +820,9 @@ private:
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
 
+
+    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
+    bool skipColorLayer(const char* layerType);
     sp<StartPropertySetThread> mStartPropertySetThread;
 
     /* ------------------------------------------------------------------------
@@ -820,6 +905,9 @@ private:
      */
     void invalidateHwcGeometry();
 
+    sp<DisplayDevice> getVsyncSource();
+    void updateVsyncSource();
+    void forceResyncModel();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
@@ -846,6 +934,8 @@ private:
                                const DisplayDeviceState& currentState,
                                const DisplayDeviceState& drawingState) REQUIRES(mStateLock);
     void processDisplayHotplugEventsLocked() REQUIRES(mStateLock);
+    void setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                      const DisplayDeviceState& state);
 
     void dispatchDisplayHotplugEvent(PhysicalDisplayId displayId, bool connected);
 
@@ -858,6 +948,8 @@ private:
     // the desired refresh rate.
     void changeRefreshRateLocked(const RefreshRate&, Scheduler::ConfigEvent event)
             REQUIRES(mStateLock);
+
+    void setRefreshRateTo(int32_t refreshRate);
 
     bool isDisplayConfigAllowed(HwcConfigIndexType configId) const REQUIRES(mStateLock);
 
@@ -983,6 +1075,30 @@ private:
 
     void onFrameRateFlexibilityTokenReleased();
 
+    void setContentFps(uint32_t contentFps);
+
+    bool isInternalDisplay(const sp<DisplayDevice>& display);
+
+    bool getHwcDisplayId(const sp<DisplayDevice>& display, uint32_t *hwcDisplayId);
+
+    void updateDisplayExtension(uint32_t displayId, uint32_t configId, bool connected);
+
+    void setDisplayExtnActiveConfig(uint32_t displayId, uint32_t activeConfigId);
+
+    void notifyAllDisplaysUpdateImminent();
+
+    void notifyDisplayUpdateImminent();
+
+    void handlePresentationDisplaysEarlyWakeup(size_t updatingDisplays, uint32_t layerStackId);
+
+    void updateInternalDisplaysPresentationMode();
+
+    void setupEarlyWakeUpFeature();
+
+    void createPhaseOffsetExtn();
+
+    void setEarlyWakeUpConfig(const sp<DisplayDevice>& display, hal::PowerMode mode);
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1001,6 +1117,8 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mVsyncLock;
+    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
@@ -1076,6 +1194,8 @@ private:
 
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
+    bool mVsyncSourceReliableOnDoze = false;
+    bool mPluggableVsyncPrioritized = false;
     bool mDebugDisableHWC = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
@@ -1099,9 +1219,15 @@ private:
     std::atomic<bool> mDisableBlurs = false;
     // If blurs are considered expensive and should require high GPU frequency.
     bool mBlursAreExpensive = false;
+    bool mUseAdvanceSfOffset = false;
+    bool mUseFbScaling = false;
+    bool mAsyncVdsCreationSupported = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
+
+    std::mutex mVsyncPeriodMutex;
+    std::vector<nsecs_t> mVsyncPeriods;
 
     TransactionCompletedThread mTransactionCompletedThread;
 
@@ -1163,6 +1289,10 @@ private:
     bool mHasPoweredOff = false;
 
     std::atomic<size_t> mNumLayers = 0;
+    // Vsync Source
+    sp<DisplayDevice> mActiveVsyncSource = NULL;
+    sp<DisplayDevice> mNextVsyncSource = NULL;
+    std::list<sp<DisplayDevice>> mDisplaysList;
 
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
@@ -1296,6 +1426,39 @@ private:
     int mFrameRateFlexibilityTokenCount = 0;
 
     sp<IBinder> mDebugFrameRateFlexibilityToken;
+
+    SmomoWrapper mSmoMo;
+    LayerExtWrapper mLayerExt;
+
+public:
+    nsecs_t mRefreshTimeStamp = -1;
+    nsecs_t mVsyncPeriod = -1;
+    std::string mNameLayerMax;
+    int mMaxQueuedFrames = -1;
+    int mNumIdle = -1;
+
+private:
+    bool mEarlyWakeUpEnabled = false;
+    bool wakeUpPresentationDisplays = false;
+    bool mInternalPresentationDisplays = false;
+    bool mDolphinFuncsEnabled = false;
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinInit)() = nullptr;
+    bool (*mDolphinMonitor)(int number, nsecs_t vsyncPeriod) = nullptr;
+    void (*mDolphinScaling)(int numIdle, int maxQueuedFrames) = nullptr;
+    void (*mDolphinRefresh)() = nullptr;
+    void (*mDolphinDequeueBuffer)(const char *name) = nullptr;
+    void (*mDolphinQueueBuffer)(const char *name) = nullptr;
+
+    FrameExtnIntf* mFrameExtn = nullptr;
+    void *mFrameExtnLibHandle = nullptr;
+    bool (*mCreateFrameExtnFunc)(FrameExtnIntf **interface) = nullptr;
+    bool (*mDestroyFrameExtnFunc)(FrameExtnIntf *interface) = nullptr;
+    composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
+    composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
+    composer::DisplayExtnIntf *mDisplayExtnIntf = nullptr;
+    bool mUseLayerExt = false;
+    bool mSplitLayerExt = false;
 };
 
 } // namespace android

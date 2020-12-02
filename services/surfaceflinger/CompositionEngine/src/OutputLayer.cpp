@@ -475,6 +475,12 @@ void OutputLayer::writeOutputIndependentPerFrameStateToHWC(
             // Ignored
             break;
     }
+
+    if (auto error = hwcLayer->setType(outputIndependentState.layerClass);
+        error != hal::Error::NONE) {
+        ALOGE("[%s] Failed to set layer class: %s (%d)", getLayerFE().getDebugName(),
+              to_string(error).c_str(), static_cast<int32_t>(error));
+    }
 }
 
 void OutputLayer::writeSolidColorStateToHWC(HWC2::Layer* hwcLayer,

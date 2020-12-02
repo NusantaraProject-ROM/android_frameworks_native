@@ -39,6 +39,8 @@
 #include <gui/SurfaceComposerClient.h>
 #include <gui/SurfaceControl.h>
 
+#include "dlfcn.h"
+
 namespace android {
 
 // ============================================================================
@@ -51,7 +53,8 @@ SurfaceControl::SurfaceControl(const sp<SurfaceComposerClient>& client, const sp
       : mClient(client),
         mHandle(handle),
         mGraphicBufferProducer(gbp),
-        mTransformHint(transform) {}
+        mTransformHint(transform),
+        mExtension(mHandle, &mGraphicBufferProducer) {}
 
 SurfaceControl::SurfaceControl(const sp<SurfaceControl>& other) {
     mClient = other->mClient;
@@ -123,6 +126,7 @@ sp<Surface> SurfaceControl::generateSurfaceLocked() const
 {
     // This surface is always consumed by SurfaceFlinger, so the
     // producerControlledByApp value doesn't matter; using false.
+    mExtension.init();
     mSurfaceData = new Surface(mGraphicBufferProducer, false);
 
     return mSurfaceData;
@@ -194,6 +198,53 @@ sp<SurfaceControl> SurfaceControl::readFromParcel(const Parcel* parcel) {
                                       interface_cast<ISurfaceComposerClient>(client)),
                               handle.get(), interface_cast<IGraphicBufferProducer>(gbp),
                                transformHint);
+}
+
+typedef bool (*InitFunc_t)(sp<IGraphicBufferProducer>*, const sp<IBinder>&);
+typedef void (*DeinitFunc_t)(const sp<IBinder>&);
+SurfaceControl::VpsExtension::VpsExtension()
+   : mIsEnable(false),
+     mLibHandler(nullptr),
+     mFuncInit(nullptr),
+     mFuncDeinit(nullptr) {
+}
+
+SurfaceControl::VpsExtension::VpsExtension(const sp<IBinder> handle,
+                                           sp<IGraphicBufferProducer>* gbp)
+    : mIsEnable(false),
+      mGbp(gbp),
+      mHandle(handle),
+      mLibHandler(nullptr),
+      mFuncInit(nullptr),
+      mFuncDeinit(nullptr) {
+    // UID:10000 is AID_APP_START for 3rd party application.
+    // The system application will not enter this logic.
+    if (getuid() < 10000)
+        return;
+    mLibHandler = dlopen("libvpsextension.so", RTLD_NOW|RTLD_GLOBAL);
+    if (mLibHandler == nullptr)
+        return;
+    mFuncInit = dlsym(mLibHandler, "Init");
+    mFuncDeinit = dlsym(mLibHandler, "Deinit");
+    if (mFuncInit) {
+        mIsEnable = reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mHandle);
+    }
+}
+
+SurfaceControl::VpsExtension::~VpsExtension() {
+    if (mIsEnable && mFuncDeinit) {
+        reinterpret_cast<DeinitFunc_t>(mFuncDeinit)(mHandle);
+    }
+    if (mLibHandler != nullptr) {
+        dlclose(mLibHandler);
+    }
+    mLibHandler = nullptr;
+}
+
+void SurfaceControl::VpsExtension::init() const {
+    if (mIsEnable && mFuncInit) {
+        reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mHandle);
+    }
 }
 
 // ----------------------------------------------------------------------------

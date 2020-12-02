@@ -20,6 +20,7 @@
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <dlfcn.h>
 #include <pthread.h>
 #include <sched.h>
 #include <sys/types.h>
@@ -125,7 +126,7 @@ EventThreadConnection::EventThreadConnection(EventThread* eventThread,
       : resyncCallback(std::move(resyncCallback)),
         mConfigChanged(configChanged),
         mEventThread(eventThread),
-        mChannel(gui::BitTube::DefaultSize) {}
+        mChannel(gui::BitTube(8 * 1024 /* default size is 4KB, double it */)) {}
 
 EventThreadConnection::~EventThreadConnection() {
     // do nothing here -- clean-up will happen automatically
@@ -189,10 +190,20 @@ EventThread::EventThread(std::unique_ptr<VSyncSource> vsyncSource,
     }
 
     set_sched_policy(tid, SP_FOREGROUND);
+    mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+    if (!mDolphinHandle) {
+        ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+    } else {
+        mDolphinCheck = (bool (*) (const char*))dlsym(mDolphinHandle, "dolphinCheck");
+        if (!mDolphinCheck)
+            dlclose(mDolphinHandle);
+    }
 }
 
 EventThread::~EventThread() {
     mVSyncSource->setCallback(nullptr);
+    if(mDolphinCheck)
+        dlclose(mDolphinHandle);
 
     {
         std::lock_guard<std::mutex> lock(mMutex);
@@ -345,6 +356,7 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
 
         bool vsyncRequested = false;
 
+        int aliveCount = 0;
         // Find connections that should consume this event.
         auto it = mDisplayEventConnections.begin();
         while (it != mDisplayEventConnections.end()) {
@@ -353,11 +365,28 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
 
                 if (event && shouldConsumeEvent(*event, connection)) {
                     consumers.push_back(connection);
+                    if (mDolphinCheck)
+                        aliveCount++;
                 }
 
                 ++it;
             } else {
                 it = mDisplayEventConnections.erase(it);
+            }
+        }
+        if (mDolphinCheck) {
+            if (event && aliveCount == 0 && mDolphinCheck(mThreadName)) {
+                auto it = mDisplayEventConnections.begin();
+                while (it != mDisplayEventConnections.end() && aliveCount == 0) {
+                    if (const auto connection = it->promote()) {
+                        consumers.push_back(connection);
+                        aliveCount++;
+                        mVSyncSource->setVSyncEnabled(false);
+                        ++it;
+                    } else {
+                        it = mDisplayEventConnections.erase(it);
+                    }
+                }
             }
         }
 
@@ -450,20 +479,26 @@ bool EventThread::shouldConsumeEvent(const DisplayEventReceiver::Event& event,
 
 void EventThread::dispatchEvent(const DisplayEventReceiver::Event& event,
                                 const DisplayEventConsumers& consumers) {
+    const uint8_t num_attempts = 3;
     for (const auto& consumer : consumers) {
-        switch (consumer->postEvent(event)) {
-            case NO_ERROR:
-                break;
+        bool needs_retry = true;
+        for (uint8_t attempt = 0; needs_retry && (attempt < num_attempts); attempt++) {
+            switch (consumer->postEvent(event)) {
+                case NO_ERROR:
+                    needs_retry = false;
+                    break;
 
-            case -EAGAIN:
-                // TODO: Try again if pipe is full.
-                ALOGW("Failed dispatching %s for %s", toString(event).c_str(),
-                      toString(*consumer).c_str());
-                break;
+                case -EAGAIN:
+                    ALOGW("Failed dispatching %s for %s. attempt %d", toString(event).c_str(),
+                          toString(*consumer).c_str(), attempt+1);
+                    needs_retry = true;
+                    break;
 
-            default:
-                // Treat EPIPE and other errors as fatal.
-                removeDisplayEventConnectionLocked(consumer);
+                default:
+                    // Treat EPIPE and other errors as fatal.
+                    removeDisplayEventConnectionLocked(consumer);
+                    needs_retry = false;
+            }
         }
     }
 }

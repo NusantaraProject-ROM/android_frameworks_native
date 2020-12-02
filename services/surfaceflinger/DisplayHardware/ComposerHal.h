@@ -189,6 +189,7 @@ public:
                                         const std::vector<IComposerClient::Rect>& visible) = 0;
     virtual Error setLayerZOrder(Display display, Layer layer, uint32_t z) = 0;
     virtual Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) = 0;
+    virtual Error setLayerType(Display display, Layer layer, uint32_t type) = 0;
 
     // Composer HAL 2.2
     virtual Error setLayerPerFrameMetadata(
@@ -242,6 +243,7 @@ public:
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) = 0;
     virtual Error getClientTargetProperty(
             Display display, IComposerClient::ClientTargetProperty* outClientTargetProperty) = 0;
+    virtual Error setDisplayElapseTime(Display display, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -437,6 +439,7 @@ public:
                                 const std::vector<IComposerClient::Rect>& visible) override;
     Error setLayerZOrder(Display display, Layer layer, uint32_t z) override;
     Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) override;
+    Error setLayerType(Display display, Layer layer, uint32_t type) override;
 
     // Composer HAL 2.2
     Error setLayerPerFrameMetadata(
@@ -463,6 +466,7 @@ public:
             Display display, Layer layer,
             const std::vector<IComposerClient::PerFrameMetadataBlob>& metadata) override;
     Error setDisplayBrightness(Display display, float brightness) override;
+    Error setDisplayElapseTime(Display display, uint64_t timeStamp) override;
 
     // Composer HAL 2.4
     bool isVsyncPeriodSwitchSupported() override { return mClient_2_4 != nullptr; }
@@ -497,10 +501,12 @@ private:
         ~CommandWriter() override;
 
         void setLayerInfo(uint32_t type, uint32_t appId);
+        void setLayerType(uint32_t type);
         void setClientTargetMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
         void setLayerBufferMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
+        void setDisplayElapseTime(uint64_t time);
 
     private:
         void writeBufferMetadata(
@@ -511,6 +517,9 @@ private:
     public:
         explicit CommandWriter(uint32_t initialMaxSize) : CommandWriterBase(initialMaxSize) {}
         ~CommandWriter() override {}
+
+        void setDisplayElapseTime(uint64_t time);
+        void setLayerType(uint32_t type);
     };
 #endif // defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
 
