@@ -1868,17 +1868,14 @@ void SurfaceFlinger::signalRefresh() {
     mEventQueue->refresh();
 }
 
-nsecs_t SurfaceFlinger::getVsyncPeriod() const {
+nsecs_t SurfaceFlinger::getVsyncPeriodFromHWC() const {
     auto displayId = getInternalDisplayIdLocked();
     if (mNextVsyncSource) {
         displayId = mNextVsyncSource->getId();
     } else if (mActiveVsyncSource) {
-        displayId = mActiveVsyncSource->getId();
+       displayId = mActiveVsyncSource->getId();
     }
-}
 
-nsecs_t SurfaceFlinger::getVsyncPeriodFromHWC() const {
-    const auto displayId = getInternalDisplayIdLocked();
     if (!displayId || !getHwComposer().isConnected(*displayId)) {
         return 0;
     }
@@ -2022,7 +2019,7 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hal::HWDisplayId /*hwcDis
         // Track Vsync Period before and after refresh.
         std::lock_guard lock(mVsyncPeriodMutex);
         mVsyncPeriods = {};
-        mVsyncPeriods.push_back(getVsyncPeriod());
+        mVsyncPeriods.push_back(getVsyncPeriodFromHWC());
     }
 }
 
@@ -2208,7 +2205,7 @@ void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
         return;
     }
 
-    const nsecs_t period = getVsyncPeriod();
+    const nsecs_t period = getVsyncPeriodFromHWC();
     mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
     if (timeStamp > 0) {
         bool periodFlushed = false;
@@ -2871,7 +2868,7 @@ void SurfaceFlinger::forceResyncModel() NO_THREAD_SAFETY_ANALYSIS {
         return;
     }
 
-    const nsecs_t period = getVsyncPeriod();
+    const nsecs_t period = getVsyncPeriodFromHWC();
     // Model resync should happen at every fps change.
     // Upon increase/decrease in vsync period start resync immediately.
     // Initial set of vsync wakeups happen at ref_time + N * period where N = 1, 2, 3 ..
@@ -2960,13 +2957,13 @@ void SurfaceFlinger::updateVsyncSource()
     } else if (mNextVsyncSource && (mActiveVsyncSource == NULL)) {
         mScheduler->onScreenAcquired(mAppConnectionHandle);
         bool isPrimary = mNextVsyncSource->isPrimary();
-        nsecs_t vsync = (isPrimary && (mVsyncPeriod > 0)) ? mVsyncPeriod : getVsyncPeriod();
+        nsecs_t vsync = (isPrimary && (mVsyncPeriod > 0)) ? mVsyncPeriod : getVsyncPeriodFromHWC();
         mScheduler->resyncToHardwareVsync(true, vsync);
     } else if ((mNextVsyncSource != NULL) &&
         (mActiveVsyncSource != NULL)) {
         // Switch vsync to the new source
         mScheduler->disableHardwareVsync(true);
-        mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+        mScheduler->resyncToHardwareVsync(true, getVsyncPeriodFromHWC());
     }
 }
 
