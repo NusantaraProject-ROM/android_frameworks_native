@@ -128,12 +128,6 @@
 #include "android-base/stringprintf.h"
 #include "gralloc_priv.h"
 
-#if __has_include("QtiGralloc.h")
-#include "QtiGralloc.h"
-#else
-#include "gralloc_priv.h"
-#endif
-
 #define MAIN_THREAD ACQUIRE(mStateLock) RELEASE(mStateLock)
 
 #define ON_MAIN_THREAD(expr)                                       \
@@ -2652,7 +2646,7 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
     builder.setLayerStackId(state.layerStack);
     builder.setPowerAdvisor(&mPowerAdvisor);
     builder.setUseHwcVirtualDisplays((mUseHwcVirtualDisplays && canAllocateHwcForVDS) ||
-                                     getHwComposer().isUsingVrComposer());
+                                      getHwComposer().isUsingVrComposer());
     builder.setName(state.displayName);
     const auto compositionDisplay = getCompositionEngine().createDisplay(builder.build());
 
@@ -2666,9 +2660,8 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
 
     if (state.isVirtual()) {
         sp<VirtualDisplaySurface> vds =
-                new VirtualDisplaySurface(getHwComposer(), displayId, state.surface,
-                                          bqProducer, bqConsumer, state.displayName,
-                                          state.isSecure);
+                new VirtualDisplaySurface(getHwComposer(), displayId, state.surface, bqProducer,
+                                          bqConsumer, state.displayName);
 
         displaySurface = vds;
         producer = vds;
@@ -6115,7 +6108,6 @@ bool SurfaceFlinger::canAllocateHwcDisplayIdForVDS(uint64_t usage) {
     return (allowHwcForVDS || ((usage & flag_mask_pvt_wfd) &&
             (usage & flag_mask_hw_video)));
 }
-
 bool SurfaceFlinger::skipColorLayer(const char* layerType) {
     return (sDirectStreaming && !strncmp(layerType, "ColorLayer", strlen("ColorLayer")));
 }
